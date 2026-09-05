@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>楓之谷現金成本計算器</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif;color:#1f2937}
+  .app{max-width:520px;margin:auto;min-height:100vh;background:#fff}
+  header{padding:24px 20px 18px;background:linear-gradient(135deg,#111827,#374151);color:#fff}
+  h1{font-size:22px;margin:0 0 5px}.sub{font-size:13px;opacity:.75}
+  main{padding:18px}
+  .card{border:1px solid #e5e7eb;border-radius:16px;padding:16px;margin-bottom:14px;background:#fff}
+  label{display:block;font-size:13px;font-weight:600;margin:0 0 7px;color:#4b5563}
+  input,select{width:100%;height:46px;border:1px solid #d1d5db;border-radius:11px;padding:0 12px;font-size:16px;background:#fff}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .result{background:#f9fafb}
+  .big{font-size:32px;font-weight:800;margin:4px 0 3px}
+  .muted{font-size:12px;color:#6b7280}
+  .line{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:14px}
+  .line:last-child{border-bottom:0}
+  .highlight{font-weight:700}
+  button{width:100%;height:48px;border:0;border-radius:12px;background:#111827;color:white;font-size:16px;font-weight:700}
+  .note{font-size:12px;line-height:1.6;color:#6b7280}
+  .error{color:#b91c1c;font-size:13px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <h1>楓之谷現金成本計算器</h1>
+  <div class="sub">計算「要買到指定楓點商品」最低需要準備多少現金</div>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>商品價格（楓點）</label>
+        <input id="target" type="number" min="0" value="5000">
+      </div>
+      <div>
+        <label>儲值回饋</label>
+        <input id="cashback" type="number" min="0" step="0.1" value="5">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>VIP 等級</label>
+    <select id="vip">
+      <option value="0">無 VIP（0）</option>
+      <option value="20">銀牌（20 VIP／1 點）</option>
+      <option value="30" selected>金牌（30 VIP／1 點）</option>
+      <option value="40">鑽石（40 VIP／1 點）</option>
+      <option value="50">皇家／皇家黑（50 VIP／1 點）</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>目前樂豆點</label>
+        <input id="points" type="number" min="0" value="0">
+      </div>
+      <div>
+        <label>目前楓點</label>
+        <input id="maple" type="number" min="0" value="0">
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label>目前 VIP 點數</label>
+      <input id="vipPoints" type="number" min="0" value="0">
+    </div>
+  </div>
+
+  <div class="card result">
+    <div class="muted">最低現金支出（以整數元儲值計算）</div><div id="status" class="muted" style="margin-top:4px"></div>
+    <div class="big" id="cash">$0</div>
+    <div class="line"><span>預計取得樂豆點</span><b id="obtained">0</b></div>
+    <div class="line"><span>消費後取得 VIP 點數</span><b id="earnedVip">0</b></div>
+    <div class="line"><span>可由 VIP 兌換楓點</span><b id="vipMaple">0</b></div>
+    <div class="line"><span>可用楓點總量</span><b id="totalMaple">0</b></div>
+    <div class="line highlight"><span>距離目標</span><b id="remain">5,000</b></div>
+    <div id="message" class="error"></div>
+  </div>
+
+  <div class="card">
+    <div class="note">
+      暫定規則：每 300 VIP 點數可兌換 1 楓點；儲值回饋直接增加樂豆點。
+      VIP 點數只由「本次新增並消費的樂豆點」產生，不會讓既有樂豆點重複產生 VIP。
+      本版本先假設 1 元 = 1 原始樂豆點，現金以整數元計算。
+    </div>
+  </div>
+  <button onclick="resetAll()">恢復預設值</button>
+</main>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+function fmt(n){return Math.floor(n).toLocaleString("zh-TW")}
+function calc(){
+  const target=Math.max(0,Number($("target").value)||0);
+  const cb=Math.max(0,Number($("cashback").value)||0)/100;
+  const vipRate=Math.max(0,Number($("vip").value)||0);
+  const initialPoints=Math.max(0,Number($("points").value)||0);
+  const initialMaple=Math.max(0,Number($("maple").value)||0);
+  const initialVip=Math.max(0,Number($("vipPoints").value)||0);
+
+  // For a given cash C, assume C original points + cashback, and all usable points are spent.
+  // VIP earned from newly spent points only. Existing VIP is converted too.
+  function state(cash){
+    const newPoints=Math.floor(cash*(1+cb));
+    // VIP is earned from the points consumed in this purchase cycle.
+    // Existing points do not retroactively create VIP points.
+    const vipFromSpend=newPoints*vipRate;
+    const totalVip=initialVip+vipFromSpend;
+    const vipMaple=Math.floor(totalVip/300);
+    const spendablePoints=initialPoints+newPoints;
+    const total=initialMaple+spendablePoints+vipMaple;
+    return {newPoints,spendablePoints,vipFromSpend,vipMaple,total};
+  }
+
+  // Find minimum integer cash satisfying target. Existing points can already cover it.
+  let lo=0, hi=Math.max(1,Math.ceil(target));
+  while(state(hi).total<target) hi*=2;
+  while(lo<hi){
+    const mid=Math.floor((lo+hi)/2);
+    if(state(mid).total>=target) hi=mid; else lo=mid+1;
+  }
+  const s=state(lo);
+  $("cash").textContent="$"+fmt(lo);
+  $("obtained").textContent=fmt(s.spendablePoints);
+  $("earnedVip").textContent=fmt(s.vipFromSpend);
+  $("vipMaple").textContent=fmt(s.vipMaple);
+  $("totalMaple").textContent=fmt(s.total);
+  $("remain").textContent=fmt(Math.max(0,target-s.total));
+  $("message").textContent=s.total>=target?"":"資料不足";
+}
+["target","cashback","vip","points","maple","vipPoints"].forEach(id=>{
+  $(id).addEventListener("input",calc);
+  $(id).addEventListener("change",calc);
+});
+function resetAll(){
+  $("target").value=5000;$("cashback").value=5;$("vip").value=30;
+  $("points").value=0;$("maple").value=0;$("vipPoints").value=0;calc();
+}
+calc();
+</script>
+</body>
+</html>
